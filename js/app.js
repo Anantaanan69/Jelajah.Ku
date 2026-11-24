@@ -8,12 +8,20 @@ let isAuthenticated = false;
 
 function checkAuth() {
   let stored = null;
+  let storedUser = null;
+  let storedId = null;
   try {
     stored = sessionStorage.getItem("jelajah_auth");
+    storedUser = sessionStorage.getItem("jelajah_user");
+    storedId = sessionStorage.getItem("jelajah_user_id");
   } catch (err) {}
 
   if (stored === "true" || isAuthenticated) {
     isAuthenticated = true;
+    if (storedUser && typeof state !== "undefined" && state.currentUser) {
+      state.currentUser.username = storedUser;
+      if (storedId) state.currentUser.id = storedId;
+    }
     showAppScreen();
   } else {
     showLoginScreen();
@@ -46,28 +54,75 @@ function showAppScreen() {
   renderAll();
 }
 
-function handleLoginSubmit(e) {
+async function handleLoginSubmit(e) {
   e.preventDefault();
   const uInput = document.getElementById("login-username");
   const pInput = document.getElementById("login-password");
+  const submitBtn = document.getElementById("btn-login-submit");
   const errEl = document.getElementById("login-error-msg");
   const errTxt = document.getElementById("login-error-text");
 
   const u = uInput ? uInput.value.trim() : "";
   const p = pInput ? pInput.value : "";
 
-  // Validasi Username: username, Password: password
-  if (u === "username" && p === "password") {
-    isAuthenticated = true;
-    try {
-      sessionStorage.setItem("jelajah_auth", "true");
-    } catch (err) {}
-    if (errEl) errEl.style.display = "none";
-    showAppScreen();
-  } else {
+  if (!u || !p) return;
+
+  if (errEl) errEl.style.display = "none";
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerText = "Memverifikasi...";
+  }
+
+  try {
+    if (!supabaseClient && typeof initSupabaseClient === "function") {
+      initSupabaseClient();
+    }
+
+    if (!supabaseClient) {
+      throw new Error("Koneksi Supabase belum terkonfigurasi!");
+    }
+
+    // Panggil RPC fungsi verify_user_login langsung di database Supabase
+    const { data, error } = await supabaseClient.rpc("verify_user_login", {
+      p_username: u,
+      p_password: p
+    });
+
+    if (error) {
+      console.error("Login RPC error:", error);
+      throw error;
+    }
+
+    if (data && data.length > 0) {
+      const loggedUser = data[0];
+      isAuthenticated = true;
+      if (typeof state !== "undefined" && state.currentUser) {
+        state.currentUser.id = loggedUser.id;
+        state.currentUser.username = loggedUser.username;
+      }
+      try {
+        sessionStorage.setItem("jelajah_auth", "true");
+        sessionStorage.setItem("jelajah_user", loggedUser.username);
+        sessionStorage.setItem("jelajah_user_id", loggedUser.id);
+      } catch (err) {}
+
+      showAppScreen();
+    } else {
+      if (errEl) {
+        errEl.style.display = "flex";
+        if (errTxt) errTxt.innerText = "Username atau password salah!";
+      }
+    }
+  } catch (err) {
+    console.error("Login verification failed:", err);
     if (errEl) {
       errEl.style.display = "flex";
-      if (errTxt) errTxt.innerText = "Username atau password salah! (Gunakan: username / password)";
+      if (errTxt) errTxt.innerText = "Gagal memverifikasi akun ke database. Periksa koneksi!";
+    }
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerText = "Masuk ke Aplikasi";
     }
   }
 }
@@ -81,6 +136,8 @@ function executeLogout() {
   isAuthenticated = false;
   try {
     sessionStorage.removeItem("jelajah_auth");
+    sessionStorage.removeItem("jelajah_user");
+    sessionStorage.removeItem("jelajah_user_id");
   } catch (err) {}
   const uInput = document.getElementById("login-username");
   const pInput = document.getElementById("login-password");

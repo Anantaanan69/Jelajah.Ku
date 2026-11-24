@@ -1,5 +1,5 @@
 -- ==============================================================================
--- SKEMA SUPABASE (POSTGRESQL) - JELAJAH KU (BERSIH TANPA DATA DUMMY)
+-- SKEMA SUPABASE (POSTGRESQL) - JELAJAH KU
 -- ==============================================================================
 
 -- 1. EXTENSIONS
@@ -15,19 +15,45 @@ CREATE TABLE IF NOT EXISTS public.users (
     updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL
 );
 
--- Seed default user untuk testing login
+-- Seed akun pengguna yang diizinkan (ananta, meisya, anantameisya)
 INSERT INTO public.users (username, password_hash)
-VALUES ('username', crypt('password', gen_salt('bf')))
-ON CONFLICT (username) DO NOTHING;
+VALUES
+    ('ananta', crypt('password', gen_salt('bf'))),
+    ('meisya', crypt('password', gen_salt('bf'))),
+    ('anantameisya', crypt('password', gen_salt('bf')))
+ON CONFLICT (username) DO UPDATE
+SET password_hash = EXCLUDED.password_hash;
 
--- 3. ENUM TIPE TEMPAT
+-- 3. FUNGSI LOGIN (RPC) VERIFIKASI USERNAME & PASSWORD LANGSUNG DI DATABASE
+CREATE OR REPLACE FUNCTION public.verify_user_login(p_username TEXT, p_password TEXT)
+RETURNS TABLE (
+    id UUID,
+    username VARCHAR(50)
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT u.id, u.username
+    FROM public.users u
+    WHERE LOWER(u.username) = LOWER(p_username)
+      AND u.password_hash = crypt(p_password, u.password_hash)
+    LIMIT 1;
+END;
+$$;
+
+-- Beri izin eksekusi ke anon & authenticated
+GRANT EXECUTE ON FUNCTION public.verify_user_login(TEXT, TEXT) TO anon, authenticated;
+
+-- 4. ENUM TIPE TEMPAT
 DO $$ BEGIN
     CREATE TYPE place_type_enum AS ENUM ('kuliner', 'wisata');
 EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
--- 4. TABEL PLACES (Tempat Makan & Tempat Wisata - Kosong tanpa dummy)
+-- 5. TABEL PLACES (Tempat Makan & Tempat Wisata - Kosong tanpa dummy)
 CREATE TABLE IF NOT EXISTS public.places (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
@@ -41,7 +67,7 @@ CREATE TABLE IF NOT EXISTS public.places (
     updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL
 );
 
--- 5. TABEL WISHLIST (Rencana Perjalanan Aktif - Kosong tanpa dummy)
+-- 6. TABEL WISHLIST (Rencana Perjalanan Aktif - Kosong tanpa dummy)
 CREATE TABLE IF NOT EXISTS public.wishlist (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
@@ -53,7 +79,7 @@ CREATE TABLE IF NOT EXISTS public.wishlist (
     updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL
 );
 
--- 6. TABEL HISTORY (Riwayat Selesai & Link GDrive - Kosong tanpa dummy)
+-- 7. TABEL HISTORY (Riwayat Selesai & Link GDrive - Kosong tanpa dummy)
 CREATE TABLE IF NOT EXISTS public.history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
@@ -71,8 +97,11 @@ CREATE TABLE IF NOT EXISTS public.history (
     updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL
 );
 
--- 7. DISABLE RLS UNTUK KONEKSI LANGSUNG REST/JS
+-- 8. PERMISSIONS & GRANTS
 ALTER TABLE public.users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.places DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.wishlist DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.history DISABLE ROW LEVEL SECURITY;
+
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
